@@ -1,3 +1,81 @@
+# 🔭 LightRAG 二次开发：生产级可观测性增强
+
+> 本项目在开源 **[LightRAG](https://github.com/HKUDS/LightRAG)**（知识图谱 + 向量检索的 RAG 框架，Python + FastAPI）基础上二次开发，新增了 **Prometheus 指标监控**与 **X-Request-ID 全链路追踪**，并补齐了可选依赖与单元测试，将后端从“能跑”提升为“可观测、可运维”。
+
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.108+-009688?logo=fastapi&logoColor=white)
+![Prometheus](https://img.shields.io/badge/Prometheus-/metrics-E6522C?logo=prometheus&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-13%20passed-success)
+
+## ✨ 改造亮点
+
+- **Prometheus 指标暴露**（`/metrics`）：请求计数 `lightrag_http_requests_total`、请求耗时 `lightrag_http_request_duration_seconds`、在途请求 `lightrag_http_requests_in_progress`。
+- **全链路追踪**：每个请求生成或透传 `X-Request-ID`，并通过 `ContextVar` 暴露给日志与业务代码。
+- **低基数标签**：`route` 标签使用路由模板（如 `/documents/{doc_id}`），避免资源 ID 造成时间序列基数爆炸。
+- **纯 ASGI 中间件**：包装 `send` 捕获真实状态码，天然兼容流式响应；注册为最外层，覆盖 CORS / 请求体限制 / 准入控制全链路耗时。
+- **优雅降级**：`prometheus_client` 为可选依赖，未安装时追踪照常工作，`/metrics` 返回 503 并提示安装方式。
+
+## 🏗️ 系统架构
+
+```mermaid
+flowchart TB
+    Client["客户端 / WebUI"]
+
+    subgraph MW["FastAPI 中间件栈（外 → 内）"]
+        direction TB
+        OBS["ObservabilityMiddleware<br/>Prometheus 指标 · X-Request-ID"]
+        CORS["CORSMiddleware"]
+        BODY["BodyLimitMiddleware"]
+        ADM["AdmissionMiddleware"]
+    end
+
+    subgraph Routes["API Routers"]
+        RD["documents / query / graph"]
+    end
+
+    subgraph Core["LightRAG 核心"]
+        FUSE["混合检索 / 重排"]
+        VEC["向量检索"]
+        GRAPH["知识图谱检索 GraphRAG"]
+    end
+
+    subgraph Models["模型后端"]
+        LLM["LLM（Ollama / OpenAI）"]
+        EMB["Embedding 模型"]
+    end
+
+    Client --> OBS --> CORS --> BODY --> ADM --> RD
+    RD --> FUSE
+    FUSE --> VEC
+    FUSE --> GRAPH
+    FUSE --> LLM
+    FUSE --> EMB
+
+    OBS -. "/metrics" .-> PROM["Prometheus"]
+    PROM --> GRAF["Grafana 看板 / 告警"]
+```
+
+## 🚀 快速开始
+
+```bash
+# 1. 安装（含可观测性可选依赖）
+pip install -e ".[observability]"
+
+# 2. 启动服务后，抓取指标
+curl http://localhost:9621/metrics
+
+# 3. 运行可观测性单元测试（无需 LLM / GPU）
+pytest tests/api/test_observability.py -v
+```
+
+## 📚 文档
+
+- [📘 技术文档：Observability.md](./docs/Observability.md)：指标清单、Prometheus 抓取配置、Grafana 接入
+- [📝 简历项目说明：Resume-Project-Notes-zh.md](./docs/Resume-Project-Notes-zh.md)：设计决策、简历话术、面试问答
+- 上游仓库：[HKUDS/LightRAG](https://github.com/HKUDS/LightRAG)
+
+---
+
 <div align="center">
 
 <div style="margin: 20px 0;">
